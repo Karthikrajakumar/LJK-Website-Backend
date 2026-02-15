@@ -3,6 +3,7 @@ const {
   DynamoDBDocumentClient,
   PutCommand,
   ScanCommand,
+  QueryCommand
 } = require("@aws-sdk/lib-dynamodb");
 const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
 
@@ -23,7 +24,7 @@ const S3_BUCKET_NAME = process.env.S3_BUCKET_MEMBERSHIP;
 
 const generateMembershipId = () => {
   const randomNumber = Math.floor(100000 + Math.random() * 900000);
-  return `issue-${randomNumber}`;
+  return `LJK-${randomNumber}`;
 };
 
 /**
@@ -102,6 +103,8 @@ const uploadPhotoToS3 = async (base64Photo, membershipId) => {
 const registerMember = async (req, res) => {
   try {
     const formData = req.body;
+
+    console.log("Received membership registration data:", {formData});
 
     const {
       name,
@@ -219,6 +222,8 @@ const registerMember = async (req, res) => {
         ConditionExpression: "attribute_not_exists(membershipId)",
       })
     );
+
+    console.log("Membership registered successfully:", {membershipId, memberData});
 
     return res.status(200).json({
       success: true,
