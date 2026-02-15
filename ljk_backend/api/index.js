@@ -15,6 +15,8 @@ const PORT = process.env.PORT || 5000;
 const isProduction = process.env.NODE_ENV === "production";
 app.use(express.json());
 
+console.log(`Starting server in ${isProduction ? "production" : "development"} mode...`);
+
 const membershipPhotoUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
@@ -68,6 +70,8 @@ if (!isProduction) {
   });
 }
 
+console.log("API routes are being set up...");
+
 app.get("/", (req, res) => {
   res.json({ message: "Backend running on Vercel 🚀" });
 });
@@ -104,6 +108,7 @@ app.get("/api", (req, res) => {
   });
 });
 
+console.log("Setting up grievance routes...");
 
 app.post(
   "/api/grievances/submit",
@@ -136,7 +141,6 @@ app.post(
   membershipPhotoUpload.single("photo"),
   membershipController.registerMember
 );
-
 
 app.post("/api/verify-otp", async (req, res) => {
   const { token, type } = req.body;
@@ -199,6 +203,8 @@ app.post("/api/verify-otp", async (req, res) => {
   }
 });
 
+console.log("All routes set up. Server is ready to handle requests.");
+
 app.use((req, res) => {
   res.status(404).json({
     success: false,
@@ -244,7 +250,11 @@ app.use((err, req, res, next) => {
   });
 });
 
-
-
+console.log(`Server setup complete. Listening on port ${PORT}...`);
+if (!isProduction) {
+  app.listen(PORT, () => {
+    console.log(`Server is running on http://localhost:${PORT}`);
+  });
+}
 
 module.exports = serverless(app);
