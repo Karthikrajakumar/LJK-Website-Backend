@@ -15,7 +15,6 @@ const PORT = process.env.PORT || 5000;
 const isProduction = process.env.NODE_ENV === "production";
 app.use(express.json());
 
-console.log(`Starting server in ${isProduction ? "production" : "development"} mode...`);
 
 const membershipPhotoUpload = multer({
   storage: multer.memoryStorage(),
@@ -250,5 +249,4 @@ app.use((err, req, res, next) => {
   });
 });
 
-console.log(`Server setup complete. Listening on port`);
 module.exports = serverless(app);
