@@ -9,6 +9,8 @@ const serverless = require("serverless-http");
 const grievanceController = require("../controller/grievance");
 const membershipController = require("../controller/membership");
 const membershipRoutes = require("../controller/MembershipRoute");
+const taskRoutes = require("../controller/taskRoute");
+const agentRoutes = require("../controller/agentRoute");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -127,6 +129,8 @@ app.get(
 app.get("/api/grievances/list", grievanceController.listGrievances);
 app.get("/api/grievances/statistics", grievanceController.getStatistics);
 
+app.patch("/api/grievances/assign/:trackingId", grievanceController.assignAgentToGrievance);
+
 app.put(
   "/api/grievances/update/:trackingId",
   grievanceController.updateGrievanceStatus
@@ -144,6 +148,19 @@ app.post(
   membershipPhotoUpload.single("photo"),
   membershipController.registerMember
 );
+
+app.get("/api/grievances/export/csv", grievanceController.exportCsv);
+app.post("/api/grievances/comment/:trackingId", grievanceController.saveLeaderComment);
+
+app.post(
+  "/api/grievances/proof/:trackingId",
+  grievanceController.upload.single("photo"),
+  grievanceController.uploadProofAndResolve
+);
+
+app.use("/api/agents", agentRoutes);
+
+
 
 app.post("/api/verify-otp", async (req, res) => {
   const { token, type } = req.body;

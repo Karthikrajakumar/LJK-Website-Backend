@@ -5,7 +5,8 @@ const {
   QueryCommand,
   UpdateCommand,
   DeleteCommand,
-  ScanCommand
+  ScanCommand,
+  TransactWriteCommand
 } = require("@aws-sdk/lib-dynamodb");
 const { S3Client, PutObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
 const multer = require("multer");
@@ -185,7 +186,7 @@ const listGrievances = async (req, res) => {
 
       params.FilterExpression = filterExpressions.join(" AND ");
       params.ExpressionAttributeValues = expressionAttributeValues;
-
+      
       if (status) {
         params.ExpressionAttributeNames = { "#status": "status" };
       }
@@ -200,7 +201,7 @@ const listGrievances = async (req, res) => {
     });
   } catch (error) {
     console.error("List Grievances Error:", error);
-    res.status(500).json({
+    res.status(500).json({ 
       success: false,
       message: "Failed to list grievances",
       error: process.env.NODE_ENV !== "production" ? error.message : undefined
@@ -384,6 +385,314 @@ const getStatistics = async (req, res) => {
   }
 };
 
+/* ===== SAVE LEADER COMMENT ===== */
+const saveLeaderComment = async (req, res) => {
+  try {
+    const { trackingId } = req.params;
+    const { text } = req.body;
+
+    if (!text || !text.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Comment text is required",
+      });
+    }
+
+    // Find grievance by trackingId (same pattern you already use)
+    const queryResult = await dynamoDB.send(
+      new QueryCommand({
+        TableName: process.env.GRIEVANCE_TABLENAME,
+        KeyConditionExpression: "trackingId = :tid",
+        ExpressionAttributeValues: { ":tid": trackingId },
+        Limit: 1,
+      })
+    );
+
+    if (!queryResult.Items?.length) {
+      return res.status(404).json({
+        success: false,
+        message: "Grievance not found",
+      });
+    }
+
+    const existing = queryResult.Items[0];
+
+    const now = new Date().toISOString();
+
+    const result = await dynamoDB.send(
+      new UpdateCommand({
+        TableName: process.env.GRIEVANCE_TABLENAME,
+        Key: {
+          trackingId,
+          timestamp: existing.timestamp,
+        },
+        UpdateExpression:
+          "SET leaderComment = :c, leaderCommentUpdatedAt = :u, updatedAt = :u",
+        ExpressionAttributeValues: {
+          ":c": text.trim(),
+          ":u": now,
+        },
+        ReturnValues: "ALL_NEW",
+      })
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Leader comment saved",
+      grievance: result.Attributes,
+    });
+  } catch (error) {
+    console.error("Save Leader Comment Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to save leader comment",
+      error: process.env.NODE_ENV !== "production" ? error.message : undefined,
+    });
+  }
+};
+
+const assignAgentToGrievance = async (req, res) => {
+  try {
+    const { trackingId } = req.params;
+    const { agentId, agentName } = req.body;
+
+    if (!trackingId) {
+      return res.status(400).json({ success: false, message: "trackingId is required" });
+    }
+
+    if (!agentId) {
+      return res.status(400).json({ success: false, message: "agentId is required" });
+    }
+
+    // 1) Find grievance item (you store with PK=trackingId + SK=timestamp)
+    const queryResult = await dynamoDB.send(
+      new QueryCommand({
+        TableName: process.env.GRIEVANCE_TABLENAME,
+        KeyConditionExpression: "trackingId = :tid",
+        ExpressionAttributeValues: { ":tid": trackingId },
+        Limit: 1,
+      })
+    );
+
+    if (!queryResult.Items?.length) {
+      return res.status(404).json({ success: false, message: "Grievance not found" });
+    }
+
+    const grievanceItem = queryResult.Items[0];
+
+    // 2) Check agent exists
+    const agentResp = await dynamoDB.send(
+      new GetCommand({
+        TableName: process.env.AGENTS_TABLENAME,
+        Key: { agentId }, // ✅ agent table PK
+      })
+    );
+
+    if (!agentResp.Item) {
+      return res.status(404).json({ success: false, message: "Agent not found" });
+    }
+
+    const now = new Date().toISOString();
+
+    // Build a nice readable task text for agent
+    const taskText = `${grievanceItem.category || "Issue"} - ${grievanceItem.area || ""}${grievanceItem.street ? ", " + grievanceItem.street : ""}`.trim();
+
+    // 3) Transaction: update grievance + update agent
+    const tx = new TransactWriteCommand({
+      TransactItems: [
+        {
+          Update: {
+            TableName: process.env.GRIEVANCE_TABLENAME,
+            Key: { trackingId, timestamp: grievanceItem.timestamp },
+            UpdateExpression:
+              "SET #status = :s, assignedTo = :a, assignedAgentName = :n, updatedAt = :u",
+            ExpressionAttributeNames: {
+              "#status": "status",
+            },
+            ExpressionAttributeValues: {
+              // ✅ choose your status string
+              // If your UI maps "In Progress" => process, use that.
+              // If you want "Assigned", keep "Assigned".
+              ":s": "In Progress",
+              ":a": agentId,
+              ":n": agentName || agentResp.Item.name || "",
+              ":u": now,
+            },
+          },
+        },
+        {
+          Update: {
+            TableName: process.env.AGENTS_TABLENAME,
+            Key: { agentId },
+            UpdateExpression:
+              "SET #status = :st, currentTaskTrackingId = :tid, currentTaskText = :txt, updatedAt = :u",
+            ExpressionAttributeNames: {
+              "#status": "status",
+            },
+            ExpressionAttributeValues: {
+              ":st": "active",
+              ":tid": trackingId,
+              ":txt": taskText,
+              ":u": now,
+            },
+          },
+        },
+      ],
+    });
+
+    await dynamoDB.send(tx);
+
+    return res.status(200).json({
+      success: true,
+      message: "Agent assigned successfully",
+      assignedTo: agentId,
+      grievanceId: trackingId,
+      agentStatus: "active",
+      grievanceStatus: "In Progress",
+    });
+  } catch (error) {
+    console.error("Assign Agent Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to assign agent",
+      error: process.env.NODE_ENV !== "production" ? error.message : undefined,
+    });
+  }
+};
+
+
+const uploadProofAndResolve = async (req, res) => {
+  try {
+    const { trackingId } = req.params;
+    const { note = "" } = req.body;
+
+    const queryResult = await dynamoDB.send(
+      new QueryCommand({
+        TableName: process.env.GRIEVANCE_TABLENAME,
+        KeyConditionExpression: "trackingId = :tid",
+        ExpressionAttributeValues: { ":tid": trackingId },
+        Limit: 1,
+      })
+    );
+
+    if (!queryResult.Items?.length) {
+      return res.status(404).json({ success: false, message: "Grievance not found" });
+    }
+
+    const existing = queryResult.Items[0];
+
+    let proofUrl = "";
+    if (req.file?.buffer) {
+      const fileExt = path.extname(req.file.originalname);
+      const key = `grievance-proof/${trackingId}/${Date.now()}-${Math.round(
+        Math.random() * 1e9
+      )}${fileExt}`;
+
+      await s3.send(
+        new PutObjectCommand({
+          Bucket: process.env.S3_BUCKET_GRIEVANCE,
+          Key: key,
+          Body: req.file.buffer,
+          ContentType: req.file.mimetype,
+        })
+      );
+
+      proofUrl = `https://${process.env.S3_BUCKET_GRIEVANCE}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`;
+    }
+
+    const prevProof = Array.isArray(existing.proofFiles) ? existing.proofFiles : [];
+    const proofFiles = proofUrl ? [...prevProof, proofUrl] : prevProof;
+
+    const result = await dynamoDB.send(
+      new UpdateCommand({
+        TableName: process.env.GRIEVANCE_TABLENAME,
+        Key: { trackingId, timestamp: existing.timestamp },
+        UpdateExpression:
+          "SET #status = :s, publicNote = :n, proofFiles = :p, updatedAt = :u",
+        ExpressionAttributeNames: { "#status": "status" },
+        ExpressionAttributeValues: {
+          ":s": "Resolved",
+          ":n": String(note).trim(),
+          ":p": proofFiles,
+          ":u": new Date().toISOString(),
+        },
+        ReturnValues: "ALL_NEW",
+      })
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Resolved with proof",
+      grievance: result.Attributes,
+    });
+  } catch (error) {
+    console.error("Upload Proof Error:", error);
+    return res.status(500).json({ success: false, message: "Failed to upload proof" });
+  }
+};
+
+
+
+/* ===== EXPORT CSV (ALL GRIEVANCES) ===== */
+const exportCsv = async (req, res) => {
+  try {
+    const result = await dynamoDB.send(
+      new ScanCommand({
+        TableName: process.env.GRIEVANCE_TABLENAME,
+      })
+    );
+
+    const items = result.Items || [];
+
+    const safe = (v) => `"${String(v ?? "").replaceAll('"', '""')}"`;
+
+    const header = [
+      "trackingId",
+      "timestamp",
+      "fullName",
+      "mobileNumber",
+      "constituency",
+      "area",
+      "street",
+      "category",
+      "status",
+      "leaderComment",
+      "description",
+    ].join(",");
+
+    const rows = items.map((g) =>
+      [
+        g.trackingId,
+        g.timestamp,
+        g.fullName,
+        g.mobileNumber,
+        g.constituency,
+        g.area,
+        g.street,
+        g.category,
+        g.status,
+        g.leaderComment,
+        g.description,
+      ]
+        .map(safe)
+        .join(",")
+    );
+
+    const csv = header + "\n" + rows.join("\n");
+
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Disposition", "attachment; filename=grievances.csv");
+    return res.status(200).send(csv);
+  } catch (error) {
+    console.error("Export CSV Error:", error);
+    return res.status(500).json({ success: false, message: "Failed to export csv" });
+  }
+};
+
+
+
+
+
 // EXPORT ALL FUNCTIONS
 module.exports = {
   submitGrievance,
@@ -392,5 +701,9 @@ module.exports = {
   updateGrievanceStatus,
   deleteGrievance,
   getStatistics,
+  saveLeaderComment,
+  assignAgentToGrievance,
+  uploadProofAndResolve,
+  exportCsv,
   upload,
-};
+}
