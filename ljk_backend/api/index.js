@@ -9,7 +9,6 @@ const serverless = require("serverless-http");
 const grievanceController = require("../controller/grievance");
 const membershipController = require("../controller/membership");
 const membershipRoutes = require("../controller/MembershipRoute");
-const taskRoutes = require("../controller/taskRoute");
 const agentRoutes = require("../controller/agentRoute");
 
 const app = express();

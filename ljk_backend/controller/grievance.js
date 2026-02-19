@@ -128,6 +128,7 @@ const submitGrievance = async (req, res) => {
 const trackGrievance = async (req, res) => {
   try {
     const { trackingId } = req.params;
+    console.log("Tracking grievance with ID:", trackingId);
 
     const result = await dynamoDB.send(
       new QueryCommand({
@@ -138,6 +139,8 @@ const trackGrievance = async (req, res) => {
         },
       })
     );
+
+    console.log("DynamoDB query result:", result);
 
     if (!result.Items || result.Items.length === 0) {
       return res.status(404).json({
