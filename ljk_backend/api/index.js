@@ -42,6 +42,7 @@ const membershipPhotoUpload = multer({
 
 const allowedOrigins = [
   "https://ljk-website.vercel.app", // production frontend
+  "https://www.ljkofficial.com", // production frontend
   "http://localhost:3000", // local frontend
 ];
 
