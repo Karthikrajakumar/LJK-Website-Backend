@@ -76,7 +76,7 @@ const submitGrievance = async (req, res) => {
 
         await s3.send(
           new PutObjectCommand({
-            Bucket: process.env.S3_BUCKET,
+            Bucket: process.env.S3_BUCKET_GRIEVANCE,
             Key: key,
             Body: file.buffer,
             ContentType: file.mimetype,
@@ -324,7 +324,7 @@ const deleteGrievance = async (req, res) => {
 
         await s3.send(
           new DeleteObjectCommand({
-            Bucket: process.env.S3_BUCKET,
+            Bucket: process.env.S3_BUCKET_GRIEVANCE,
             Key: key,
           })
         );
