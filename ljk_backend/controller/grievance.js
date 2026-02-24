@@ -15,12 +15,18 @@ const path = require("path");
 require("dotenv").config();
 
 /* AWS clients */
-const s3 = new S3Client({ region: process.env.AWS_REGION });
+const s3 = new S3Client({
+  region: REGION,
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  },
+});
 const dynamoDB = DynamoDBDocumentClient.from(
   new DynamoDBClient({ region: process.env.AWS_REGION })
 );
 
-const S3_BUCKET_NAME = process.env.S3_BUCKET_GRIEVANCE;
+
 
 /* Multer config */
 const upload = multer({
